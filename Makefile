@@ -7,9 +7,12 @@ MINUI_LIST_VERSION      := 0.11.3
 MINUI_PRESENTER_VERSION := 0.7.0
 JQ_VERSION              := 1.7.1
 
-# Alpine Linux edge/community package version for wireguard-tools-wg
-# Check latest at: https://pkgs.alpinelinux.org/packages?name=wireguard-tools-wg
-WIREGUARD_TOOLS_VERSION := 1.0.20210914-r2
+# Alpine Linux stable version to pull wireguard-tools-wg from.
+# wireguard-tools-wg lives in the `main` repo (not community).
+# We query APKINDEX.tar.gz at build time to discover the exact version+revision
+# so the Makefile never needs updating when Alpine bumps the -rN suffix.
+# Check available versions at: https://pkgs.alpinelinux.org/package/edge/main/aarch64/wireguard-tools-wg
+ALPINE_VERSION := 3.21
 
 # wireguard-go built from source by the release workflow (see .github/workflows/release.yaml)
 # For local development, build manually:
@@ -63,13 +66,21 @@ bin/arm64/jq:
 	curl -sSL -o bin/arm64/jq.LICENSE \
 		"https://github.com/jqlang/jq/raw/refs/heads/master/COPYING"
 
-# Extract wg from Alpine Linux wireguard-tools-wg package (gzipped tarball / APK format)
+# Extract wg from Alpine Linux wireguard-tools-wg package.
+# APK files are gzipped tarballs; wg lives at usr/bin/wg inside.
+# We look up the exact filename (including -rN revision) from APKINDEX.tar.gz
+# so the Makefile doesn't need updating when Alpine bumps the revision suffix.
 bin/arm64/wg:
 	mkdir -p bin/arm64 /tmp/wg-arm64-extract
+	wg_ver=$$(curl -sSL \
+		"https://dl-cdn.alpinelinux.org/alpine/v$(ALPINE_VERSION)/main/aarch64/APKINDEX.tar.gz" | \
+		tar -xzO APKINDEX 2>/dev/null | \
+		grep -A 10 "^P:wireguard-tools-wg$$" | grep "^V:" | head -1 | cut -c3-) && \
+	[ -n "$$wg_ver" ] || { echo "ERROR: wireguard-tools-wg not found in APKINDEX"; exit 1; } && \
+	echo "Downloading wireguard-tools-wg $$wg_ver (aarch64)..." && \
 	curl -f -sSL -o /tmp/wg-arm64.apk \
-		"https://dl-cdn.alpinelinux.org/alpine/edge/community/aarch64/wireguard-tools-wg-$(WIREGUARD_TOOLS_VERSION).apk"
-	tar -xzf /tmp/wg-arm64.apk -C /tmp/wg-arm64-extract usr/bin/wg 2>/dev/null || \
-		tar -xzf /tmp/wg-arm64.apk -C /tmp/wg-arm64-extract
+		"https://dl-cdn.alpinelinux.org/alpine/v$(ALPINE_VERSION)/main/aarch64/wireguard-tools-wg-$${wg_ver}.apk" && \
+	tar -xzf /tmp/wg-arm64.apk -C /tmp/wg-arm64-extract
 	find /tmp/wg-arm64-extract -name 'wg' -type f -exec cp {} bin/arm64/wg \;
 	chmod +x bin/arm64/wg
 	rm -rf /tmp/wg-arm64.apk /tmp/wg-arm64-extract
@@ -78,10 +89,15 @@ bin/arm64/wg:
 
 bin/arm/wg:
 	mkdir -p bin/arm /tmp/wg-arm-extract
+	wg_ver=$$(curl -sSL \
+		"https://dl-cdn.alpinelinux.org/alpine/v$(ALPINE_VERSION)/main/armhf/APKINDEX.tar.gz" | \
+		tar -xzO APKINDEX 2>/dev/null | \
+		grep -A 10 "^P:wireguard-tools-wg$$" | grep "^V:" | head -1 | cut -c3-) && \
+	[ -n "$$wg_ver" ] || { echo "ERROR: wireguard-tools-wg not found in APKINDEX"; exit 1; } && \
+	echo "Downloading wireguard-tools-wg $$wg_ver (armhf)..." && \
 	curl -f -sSL -o /tmp/wg-arm.apk \
-		"https://dl-cdn.alpinelinux.org/alpine/edge/community/armhf/wireguard-tools-wg-$(WIREGUARD_TOOLS_VERSION).apk"
-	tar -xzf /tmp/wg-arm.apk -C /tmp/wg-arm-extract usr/bin/wg 2>/dev/null || \
-		tar -xzf /tmp/wg-arm.apk -C /tmp/wg-arm-extract
+		"https://dl-cdn.alpinelinux.org/alpine/v$(ALPINE_VERSION)/main/armhf/wireguard-tools-wg-$${wg_ver}.apk" && \
+	tar -xzf /tmp/wg-arm.apk -C /tmp/wg-arm-extract
 	find /tmp/wg-arm-extract -name 'wg' -type f -exec cp {} bin/arm/wg \;
 	chmod +x bin/arm/wg
 	rm -rf /tmp/wg-arm.apk /tmp/wg-arm-extract
