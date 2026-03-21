@@ -5,3 +5,4 @@ bin/arm64/wg
 bin/arm64/wireguard-go
 bin/*/*.LICENSE
 dist/
+plans/

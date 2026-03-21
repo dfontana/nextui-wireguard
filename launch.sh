@@ -66,6 +66,8 @@ will_start_on_boot() {
 
 # ---------------------------------------------------------------------------
 # WireGuard interface management
+# NOTE: wireguard_up/down/is_wireguard_up are duplicated in bin/on-boot.
+# Changes here must be mirrored there (and vice versa).
 # ---------------------------------------------------------------------------
 
 is_wireguard_up() {
@@ -210,6 +212,8 @@ current_settings() {
     minui_list_file="/tmp/${PAK_NAME}-settings.json"
     rm -f "$minui_list_file"
 
+    # Write to temp file rather than piping/heredoc — BusyBox ash has
+    # inconsistent heredoc behavior when piped to commands like jq.
     jq -rM '{settings: .settings}' "$PAK_DIR/config.json" >"$minui_list_file"
 
     if is_wireguard_up; then

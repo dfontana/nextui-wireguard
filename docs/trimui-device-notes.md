@@ -56,7 +56,8 @@ BusyBox provides most standard POSIX utilities. Notable tools relevant to WireGu
 ## Architecture Notes
 
 - The device is **exclusively aarch64** (no 32-bit ARM mode), so only `arm64` binaries are needed.
-- The Makefile also supports `arm` for potential future device compatibility.
+- 32-bit ARM (`arm`/`armhf`) support was evaluated during planning but deliberately dropped — the
+  TrimUI Brick has no 32-bit mode and there are no other target devices at this time.
 - Go binaries for `GOARCH=arm64` run natively.
 - Static C binaries compiled for `aarch64-linux-musl` (Alpine/musl libc) run without issues.
 

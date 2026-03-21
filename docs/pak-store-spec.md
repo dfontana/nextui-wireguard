@@ -63,9 +63,13 @@ Optional fields:
 |-----------------|----------------|----------------------------------------------------------------|
 | `launch`        | string         | Entry point script, default `launch.sh`                        |
 | `banners`       | object         | Device → image path for pak store banner (`"BRICK": "img.png"`)  |
-| `update_ignore` | array[string]  | Files NOT overwritten during pak updates (e.g., `config.json`) |
+| `update_ignore` | array[string]  | Files NOT overwritten during pak updates (see below)           |
 | `changelog`     | string/object  | Version history shown in pak store                             |
 | `screenshots`   | array[string]  | Paths to screenshot images for pak store listing               |
+
+**`update_ignore` note:** This pak sets `"update_ignore": ["config.json"]` because `config.json`
+holds the user's live settings state (Enable on/off, Start on boot on/off). Without this, a pak
+update would reset the user's preferences to defaults.
 
 ### Platform Identifiers
 | Device          | Platform ID |

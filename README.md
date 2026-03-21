@@ -1,5 +1,7 @@
 # WireGuard for NextUI / TrimUI Brick
 
+[![CI](https://github.com/dfontana/nextui-wireguard/actions/workflows/ci.yaml/badge.svg)](https://github.com/dfontana/nextui-wireguard/actions/workflows/ci.yaml)
+
 A NextUI pak that connects your TrimUI Brick to a WireGuard VPN, giving you access to your home
 network while on the go.
 
@@ -89,6 +91,7 @@ To update your config, drop a new `wg0.conf` at the SD root and relaunch the pak
 | Handshake never succeeds | Verify the server endpoint and port are reachable from your network |
 | "wg not found" | Binary may not be executable — check log for details |
 | No traffic through VPN | Check `AllowedIPs` in your config covers the desired subnets |
+| wireguard-go fails to start | Verify `/dev/net/tun` exists on the device (TUN kernel support required) |
 
 ## Building from Source
 
@@ -99,8 +102,9 @@ make build    # downloads all binaries
 make release  # produces dist/WireGuard.pak.zip
 ```
 
-> `wireguard-go` is built from source by the release GitHub Actions workflow.
-> For local builds, see [`plans/02-makefile-binaries.md`](plans/02-makefile-binaries.md).
+> `wireguard-go` is built from source by the release GitHub Actions workflow and is not
+> included in `make build`. See [`docs/development-guide.md`](docs/development-guide.md)
+> for local testing instructions.
 
 ## How It Works
 

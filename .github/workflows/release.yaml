@@ -34,6 +34,7 @@ jobs:
           git clone --depth=1 https://github.com/WireGuard/wireguard-go /tmp/wireguard-go
           cd /tmp/wireguard-go
 
+          # -s -w strips debug info and DWARF symbols to reduce binary size for embedded device
           GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /tmp/wg-go-arm64 .
           mkdir -p $GITHUB_WORKSPACE/bin/arm64
           cp /tmp/wg-go-arm64 $GITHUB_WORKSPACE/bin/arm64/wireguard-go
