@@ -29,7 +29,7 @@ jobs:
       - name: Update pak.json version
         run: make bump-version RELEASE_VERSION=${{ steps.version.outputs.version }}
 
-      - name: Build wireguard-go (arm64 and arm)
+      - name: Build wireguard-go (arm64)
         run: |
           git clone --depth=1 https://github.com/WireGuard/wireguard-go /tmp/wireguard-go
           cd /tmp/wireguard-go
@@ -39,14 +39,8 @@ jobs:
           cp /tmp/wg-go-arm64 $GITHUB_WORKSPACE/bin/arm64/wireguard-go
           chmod +x $GITHUB_WORKSPACE/bin/arm64/wireguard-go
 
-          GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -ldflags="-s -w" -o /tmp/wg-go-arm .
-          mkdir -p $GITHUB_WORKSPACE/bin/arm
-          cp /tmp/wg-go-arm $GITHUB_WORKSPACE/bin/arm/wireguard-go
-          chmod +x $GITHUB_WORKSPACE/bin/arm/wireguard-go
-
           cp LICENSE /tmp/wireguard-go/LICENSE
           cp /tmp/wireguard-go/LICENSE $GITHUB_WORKSPACE/bin/arm64/wireguard-go.LICENSE
-          cp /tmp/wireguard-go/LICENSE $GITHUB_WORKSPACE/bin/arm/wireguard-go.LICENSE
 
       - name: Build all other binaries
         run: make build

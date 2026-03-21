@@ -12,12 +12,7 @@ echo "$0" "$@"
 cd "$PAK_DIR" || exit 1
 mkdir -p "$USERDATA_PATH/$PAK_NAME"
 
-architecture=arm
-if uname -m | grep -q '64'; then
-    architecture=arm64
-fi
-
-export PATH="$PAK_DIR/bin/$architecture:$PAK_DIR/bin/$PLATFORM:$PAK_DIR/bin:$PATH"
+export PATH="$PAK_DIR/bin/arm64:$PAK_DIR/bin/$PLATFORM:$PAK_DIR/bin:$PATH"
 
 HUMAN_READABLE_NAME="WireGuard VPN"
 WG_CONF_IMPORT_PATH="$SDCARD_PATH/wg0.conf"
@@ -291,10 +286,10 @@ main() {
     # Ensure binaries are executable
     chmod +x "$PAK_DIR/bin/$PLATFORM/minui-list"
     chmod +x "$PAK_DIR/bin/$PLATFORM/minui-presenter"
-    chmod +x "$PAK_DIR/bin/$architecture/jq"
-    chmod +x "$PAK_DIR/bin/$architecture/wg"
-    [ -f "$PAK_DIR/bin/$architecture/wireguard-go" ] && \
-        chmod +x "$PAK_DIR/bin/$architecture/wireguard-go"
+    chmod +x "$PAK_DIR/bin/arm64/jq"
+    chmod +x "$PAK_DIR/bin/arm64/wg"
+    [ -f "$PAK_DIR/bin/arm64/wireguard-go" ] && \
+        chmod +x "$PAK_DIR/bin/arm64/wireguard-go"
     chmod +x "$PAK_DIR/bin/on-boot"
 
     # Only tg5040 (TrimUI Brick) is supported
