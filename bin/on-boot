@@ -1,0 +1,127 @@
+#!/bin/sh
+BIN_DIR="$(dirname "$0")"
+PAK_DIR="$(dirname "$BIN_DIR")"
+PAK_NAME="$(basename "$PAK_DIR")"
+PAK_NAME="${PAK_NAME%.*}"
+set -x
+
+rm -f "$LOGS_PATH/$PAK_NAME.on-boot.txt"
+exec >>"$LOGS_PATH/$PAK_NAME.on-boot.txt"
+exec 2>&1
+
+echo "$0" "$@"
+cd "$PAK_DIR" || exit 1
+
+architecture=arm
+if uname -m | grep -q '64'; then
+    architecture=arm64
+fi
+
+export PATH="$PAK_DIR/bin/$architecture:$PAK_DIR/bin/$PLATFORM:$PAK_DIR/bin:$PATH"
+
+is_wireguard_up() {
+    ip link show wg0 >/dev/null 2>&1
+}
+
+wireguard_up() {
+    conf="$USERDATA_PATH/$PAK_NAME/wg0.conf"
+
+    # Parse [Interface] section
+    private_key=$(awk '/^\[Interface\]/{found=1} found && /^\[Peer\]/{found=0} found && /^PrivateKey/{print}' "$conf" \
+        | awk -F'=' '{print $2}' | tr -d ' \t')
+    address=$(awk '/^\[Interface\]/{found=1} found && /^\[Peer\]/{found=0} found && /^Address/{print}' "$conf" \
+        | awk -F'=' '{print $2}' | tr -d ' \t')
+
+    # Parse [Peer] section
+    peer_pubkey=$(awk '/^\[Peer\]/{found=1} found && /^PublicKey/{print}' "$conf" \
+        | awk -F'=' '{print $2}' | tr -d ' \t')
+    endpoint=$(awk '/^\[Peer\]/{found=1} found && /^Endpoint/{print}' "$conf" \
+        | awk -F'=' '{sub(/^[^=]+=/, ""); print}' | tr -d ' \t')
+    allowed_ips=$(awk '/^\[Peer\]/{found=1} found && /^AllowedIPs/{print}' "$conf" \
+        | awk -F'=' '{print $2}' | tr -d ' \t')
+    keepalive=$(awk '/^\[Peer\]/{found=1} found && /^PersistentKeepalive/{print}' "$conf" \
+        | awk -F'=' '{print $2}' | tr -d ' \t')
+
+    if [ -z "$private_key" ] || [ -z "$address" ] || [ -z "$peer_pubkey" ] || [ -z "$endpoint" ]; then
+        echo "ERROR: wg0.conf is missing required fields"
+        return 1
+    fi
+
+    # Load kernel module or fall back to wireguard-go userspace driver
+    if modprobe wireguard 2>/dev/null || cat /proc/modules 2>/dev/null | grep -q '^wireguard '; then
+        echo "Using kernel WireGuard module"
+        ip link add dev wg0 type wireguard 2>/dev/null || true
+    elif command -v wireguard-go >/dev/null 2>&1; then
+        echo "Kernel module unavailable, starting wireguard-go"
+        wireguard-go wg0 &
+        # Wait for TUN device to appear (up to 5 seconds)
+        i=0
+        while [ $i -lt 5 ] && ! ip link show wg0 >/dev/null 2>&1; do
+            sleep 1
+            i=$((i + 1))
+        done
+        if ! ip link show wg0 >/dev/null 2>&1; then
+            echo "ERROR: wireguard-go failed to create wg0 interface"
+            return 1
+        fi
+    else
+        echo "ERROR: no WireGuard driver available (no kernel module and no wireguard-go)"
+        return 1
+    fi
+
+    # Write private key to temp file (wg set requires a file path)
+    tmpkey=$(mktemp)
+    printf '%s\n' "$private_key" > "$tmpkey"
+
+    # Configure the WireGuard interface
+    if [ -n "$keepalive" ]; then
+        wg set wg0 \
+            private-key "$tmpkey" \
+            peer "$peer_pubkey" \
+            endpoint "$endpoint" \
+            allowed-ips "$allowed_ips" \
+            persistent-keepalive "$keepalive"
+    else
+        wg set wg0 \
+            private-key "$tmpkey" \
+            peer "$peer_pubkey" \
+            endpoint "$endpoint" \
+            allowed-ips "$allowed_ips"
+    fi
+    wg_exit=$?
+    rm -f "$tmpkey"
+
+    if [ $wg_exit -ne 0 ]; then
+        echo "ERROR: wg set failed"
+        ip link del wg0 2>/dev/null || true
+        return 1
+    fi
+
+    # Assign interface IP address and bring it up
+    ip addr add "$address" dev wg0 2>/dev/null || true
+    ip link set up dev wg0
+
+    # Add routes for all AllowedIPs CIDRs
+    echo "$allowed_ips" | tr ',' '\n' | while read -r cidr; do
+        cidr=$(echo "$cidr" | tr -d ' \t')
+        [ -n "$cidr" ] && ip route add "$cidr" dev wg0 2>/dev/null || true
+    done
+
+    echo "WireGuard interface wg0 is up"
+}
+
+main() {
+    if is_wireguard_up; then
+        echo "WireGuard already running, skipping boot start."
+        return 0
+    fi
+
+    if [ ! -f "$USERDATA_PATH/$PAK_NAME/wg0.conf" ]; then
+        echo "No wg0.conf found at $USERDATA_PATH/$PAK_NAME/wg0.conf, skipping boot start."
+        return 0
+    fi
+
+    wireguard_up
+}
+
+main "$@"

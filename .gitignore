@@ -1,0 +1,10 @@
+bin/*/minui-list
+bin/*/minui-presenter
+bin/arm/jq
+bin/arm64/jq
+bin/arm/wg
+bin/arm64/wg
+bin/arm/wireguard-go
+bin/arm64/wireguard-go
+bin/*/*.LICENSE
+dist/

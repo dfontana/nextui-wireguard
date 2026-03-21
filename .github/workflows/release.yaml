@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get install -y jq zip curl
+
+      - name: Set up Go (for wireguard-go)
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Update pak.json version
+        run: make bump-version RELEASE_VERSION=${{ steps.version.outputs.version }}
+
+      - name: Build wireguard-go (arm64 and arm)
+        run: |
+          git clone --depth=1 https://github.com/WireGuard/wireguard-go /tmp/wireguard-go
+          cd /tmp/wireguard-go
+
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /tmp/wg-go-arm64 .
+          mkdir -p $GITHUB_WORKSPACE/bin/arm64
+          cp /tmp/wg-go-arm64 $GITHUB_WORKSPACE/bin/arm64/wireguard-go
+          chmod +x $GITHUB_WORKSPACE/bin/arm64/wireguard-go
+
+          GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -ldflags="-s -w" -o /tmp/wg-go-arm .
+          mkdir -p $GITHUB_WORKSPACE/bin/arm
+          cp /tmp/wg-go-arm $GITHUB_WORKSPACE/bin/arm/wireguard-go
+          chmod +x $GITHUB_WORKSPACE/bin/arm/wireguard-go
+
+          cp LICENSE /tmp/wireguard-go/LICENSE
+          cp /tmp/wireguard-go/LICENSE $GITHUB_WORKSPACE/bin/arm64/wireguard-go.LICENSE
+          cp /tmp/wireguard-go/LICENSE $GITHUB_WORKSPACE/bin/arm/wireguard-go.LICENSE
+
+      - name: Build all other binaries
+        run: make build
+
+      - name: Create release zip
+        run: make release
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/WireGuard.pak.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: false

@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get install -y jq zip curl
+
+      - name: Validate pak.json
+        run: |
+          jq . pak.json
+          for field in name version type description author repo_url release_filename platforms; do
+            val=$(jq -r ".$field" pak.json)
+            if [ "$val" = "null" ]; then
+              echo "ERROR: Missing required field in pak.json: $field"
+              exit 1
+            fi
+          done
+          echo "pak.json is valid"
+
+      - name: Check shell script syntax
+        run: |
+          sh -n launch.sh
+          sh -n bin/on-boot
+          echo "Shell scripts are syntactically valid"
+
+      - name: Build
+        run: make build
+
+      - name: Release
+        run: make release
+
+      - name: Verify zip structure
+        run: |
+          echo "--- Zip contents ---"
+          unzip -l "dist/$(jq -r .release_filename pak.json)"
+          echo "--- Checking required files ---"
+          unzip -l "dist/$(jq -r .release_filename pak.json)" | grep -E "launch\.sh|pak\.json|bin/"
+          echo "Zip structure OK"

@@ -1,0 +1,8 @@
+bin/tg5040/minui-list
+bin/tg5040/minui-presenter
+bin/arm64/jq
+bin/arm64/wg
+bin/arm64/wireguard-go
+bin/arm/jq
+bin/arm/wg
+bin/arm/wireguard-go

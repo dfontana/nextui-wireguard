@@ -1,0 +1,19 @@
+{
+  "name": "WireGuard",
+  "version": "1.0.0",
+  "type": "TOOL",
+  "description": "A Pak for connecting to a WireGuard VPN on TrimUI Brick.",
+  "author": "dfontana",
+  "repo_url": "https://github.com/dfontana/nextui-wireguard",
+  "release_filename": "WireGuard.pak.zip",
+  "banners": {
+    "BRICK": ".github/resources/banner.png"
+  },
+  "platforms": [
+    "tg5040"
+  ],
+  "update_ignore": [
+    "config.json"
+  ],
+  "launch": "launch.sh"
+}
