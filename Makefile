@@ -86,12 +86,15 @@ bin/arm64/wireguard-go:
 	@echo "Build: GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o bin/arm64/wireguard-go ."
 	@exit 1
 
+PAK_FILES := \
+	launch.sh \
+	pak.json \
+	config.json \
+	bin/on-boot \
+	$(foreach platform,$(PLATFORMS),bin/$(platform)/minui-list bin/$(platform)/minui-presenter) \
+	$(foreach arch,$(ARCHITECTURES),bin/$(arch)/jq bin/$(arch)/wg bin/$(arch)/wireguard-go)
+
 release: build
 	mkdir -p dist
-	git archive --format=zip --output "dist/$(PAK_NAME).pak.zip" HEAD
-	while IFS= read -r file; do \
-		if [ -f "$$file" ]; then \
-			zip -r "dist/$(PAK_NAME).pak.zip" "$$file"; \
-		fi; \
-	done < .gitarchiveinclude
+	zip "dist/$(PAK_NAME).pak.zip" $(PAK_FILES)
 	ls -lah dist
