@@ -101,8 +101,7 @@ make build    # downloads all binaries
 make release  # produces dist/WireGuard.pak.zip
 ```
 
-Requires Docker with arm64 support (for the `wg` static build). `wireguard-go` must be
-built separately — see [`docs/development-guide.md`](docs/development-guide.md).
+Requires Docker with arm64 support (for the `wg` static build). `wireguard-go` must be built separately — see [`docs/development-guide.md`](docs/development-guide.md).
 
 ## CI / Releases
 
@@ -110,8 +109,14 @@ built separately — see [`docs/development-guide.md`](docs/development-guide.md
 zip structure. No artifact is published.
 
 **Push a `v*.*.*` tag** — the release workflow does the same build, then creates a GitHub
-Release with `WireGuard.pak.zip` attached. The version in `pak.json` is updated automatically
-from the tag; no manual edit needed.
+Release with `WireGuard.pak.zip` attached. The version in `pak.json` is updated automatically from the tag; no manual edit needed.
+
+```
+jj tag set v{...} -r {...}
+jj git push --tag v{...}
+```
+
+Workflow handles the rest, nothing more to create/change.
 
 ## How It Works
 
