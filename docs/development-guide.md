@@ -195,11 +195,31 @@ The device runs BusyBox ash (POSIX sh). Key constraints:
 - **No heredocs for pipe input**: BusyBox ash has inconsistent heredoc behavior when piped to
   commands like `jq`. Use temp files instead (this is why `launch.sh` writes JSON to temp files
   before passing them to `jq`, rather than using here-strings or heredocs)
-- **Test locally with `dash`** for closer POSIX behavior than `bash`
+- **Sourcing works**: `. /absolute/path/to/lib.sh` loads a file and makes its functions
+  available in the calling shell. Verified on this device. The libraries under `bin/lib/`
+  rely on this — see Code Structure below.
+- **Test locally with `dash`** for closer POSIX behavior than `bash`. Both `sh -n` and `dash -n`
+  catch most ash-incompatible syntax before deploying.
 
-## Code Maintenance Notes
+## Code Structure
 
-The `wireguard_up()` function is duplicated in both `launch.sh` and `bin/on-boot`. These two
-copies must be kept in sync when making changes to WireGuard interface setup logic. A shared
-library was considered but rejected for POSIX sh simplicity (avoiding `source`/`.` path
-resolution issues across different invocation contexts).
+Both entry points — `launch.sh` (UI) and `bin/on-boot` (auto-start hook) — derive `$PAK_DIR`
+from `$0` and then source three small libraries from `bin/lib/`:
+
+| Library | Provides |
+|---------|----------|
+| `bin/lib/common.sh` | `init_logging`, `init_path`, `show_message` |
+| `bin/lib/wireguard.sh` | `is_wireguard_up`, `get_wireguard_ip`, `get_last_handshake`, `wireguard_up <conf>`, `wireguard_down` |
+| `bin/lib/boot-hook.sh` | `enable_start_on_boot`, `disable_start_on_boot`, `will_start_on_boot` (used only by `launch.sh`) |
+
+The libraries are not executable and are not placed on `$PATH` — they are loaded by absolute
+path from `$PAK_DIR`. Macos-tar AppleDouble sibling files (`._common.sh` etc.) appear in the
+deployed pak but are harmless: nothing sources them.
+
+### Adding a new library file
+
+1. Drop the `.sh` file under `bin/lib/`. No shebang (it's sourced, not executed).
+2. Add the path to `PAK_FILES` in `Makefile` so it gets bundled into the release zip. Missing
+   this step is silent — the local copy works, but the zipped pak crashes at `source` time.
+3. Source it from the entry points that need it (`launch.sh` and/or `bin/on-boot`) AFTER
+   `init_path` and after any required env vars are set.

@@ -2,8 +2,7 @@
 
 [![CI](https://github.com/dfontana/nextui-wireguard/actions/workflows/ci.yaml/badge.svg)](https://github.com/dfontana/nextui-wireguard/actions/workflows/ci.yaml)
 
-A NextUI pak that connects your TrimUI Brick to a WireGuard VPN, giving you access to your home
-network while on the go.
+A NextUI pak that connects your TrimUI Brick to a WireGuard VPN, giving you access to your home network while on the go.
 
 ## Requirements
 

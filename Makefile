@@ -88,6 +88,9 @@ PAK_FILES := \
 	pak.json \
 	config.json \
 	bin/on-boot \
+	bin/lib/common.sh \
+	bin/lib/wireguard.sh \
+	bin/lib/boot-hook.sh \
 	$(foreach platform,$(PLATFORMS),bin/$(platform)/minui-list bin/$(platform)/minui-presenter) \
 	$(foreach arch,$(ARCHITECTURES),bin/$(arch)/jq bin/$(arch)/wg bin/$(arch)/wireguard-go)
 
