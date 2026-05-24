@@ -66,7 +66,7 @@ bin/arm64/wg:
 	docker run --rm --platform linux/arm64 \
 		-v "$(CURDIR)/bin/arm64:/output" \
 		alpine:$(ALPINE_VERSION) sh -c \
-		'apk add --no-cache gcc make libmnl-dev libmnl-static git && \
+		'apk add --no-cache build-base libmnl-dev libmnl-static git && \
 		 git clone --depth=1 https://git.zx2c4.com/wireguard-tools /tmp/wt && \
 		 LDFLAGS="-static" make -C /tmp/wt/src wg && \
 		 cp /tmp/wt/src/wg /output/wg && chmod +x /output/wg'

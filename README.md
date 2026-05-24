@@ -102,9 +102,16 @@ make build    # downloads all binaries
 make release  # produces dist/WireGuard.pak.zip
 ```
 
-> `wireguard-go` is built from source by the release GitHub Actions workflow and is not
-> included in `make build`. See [`docs/development-guide.md`](docs/development-guide.md)
-> for local testing instructions.
+Requires Docker with arm64 support (for the `wg` static build). `wireguard-go` must be
+built separately — see [`docs/development-guide.md`](docs/development-guide.md).
+
+## CI / Releases
+
+**Push to `main`** — CI builds all binaries (including `wireguard-go`) and verifies the
+zip structure. No artifact is published.
+
+**Push a `v*.*.*` tag** — the release workflow does the same build, then creates a GitHub
+Release with `WireGuard.pak.zip` attached.
 
 ## How It Works
 
