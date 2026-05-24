@@ -40,8 +40,12 @@ jobs:
           cp /tmp/wg-go-arm64 $GITHUB_WORKSPACE/bin/arm64/wireguard-go
           chmod +x $GITHUB_WORKSPACE/bin/arm64/wireguard-go
 
-          cp LICENSE /tmp/wireguard-go/LICENSE
           cp /tmp/wireguard-go/LICENSE $GITHUB_WORKSPACE/bin/arm64/wireguard-go.LICENSE
+
+      - name: Set up QEMU (arm64 Docker builds for wg)
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
 
       - name: Build all other binaries
         run: make build

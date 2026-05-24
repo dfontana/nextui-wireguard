@@ -1,5 +1,20 @@
 # Development Guide
 
+## Critical Device Facts (Read This First)
+
+These were confirmed via live SSH inspection of the TrimUI Brick. They contradict some
+common assumptions about OpenWrt-based devices.
+
+| Fact | Detail |
+|------|--------|
+| Kernel | Linux **4.9.191** — predates mainline WireGuard (added in 5.6) |
+| C library | **glibc 2.33** — NOT musl, NOT uclibc |
+| WireGuard kernel module | **Does not exist** — `wireguard-go` is always used |
+| `/dev/net/tun` | **Present** — wireguard-go works |
+| `modprobe wireguard` exit code | **Unreliable** — returns 0 even when module is absent; check `/proc/modules` instead |
+| Pre-built Alpine `wg` binary | **Will NOT run** — it is musl-linked; must build with `LDFLAGS=-static` |
+| SSH | `root` / `tina` on port 22 (dropbear) |
+
 ## Local Testing (Without Device)
 
 ### Syntax Checking
@@ -15,12 +30,17 @@ Set the environment variables that NextUI normally provides:
 
 ```sh
 export PLATFORM=tg5040
+export DEVICE=brick
+export IS_NEXT=yes
 export SDCARD_PATH=/tmp/test-sdcard
 export USERDATA_PATH=/tmp/test-sdcard/.userdata/tg5040
+export SHARED_USERDATA_PATH=/tmp/test-sdcard/.userdata/shared
 export LOGS_PATH=/tmp/test-sdcard/.userdata/tg5040/logs
+export HOOKS_PATH=/tmp/test-sdcard/.userdata/tg5040/.hooks
+export DATETIME_PATH=/tmp/test-sdcard/.userdata/shared/datetime.txt
 export PAK_DIR=/tmp/test-pak
 
-mkdir -p $SDCARD_PATH $USERDATA_PATH $LOGS_PATH $PAK_DIR/bin/{arm64,tg5040}
+mkdir -p $SDCARD_PATH $USERDATA_PATH $SHARED_USERDATA_PATH $LOGS_PATH $HOOKS_PATH $PAK_DIR/bin/{arm64,tg5040}
 
 # Copy pak files into the simulated pak directory
 cp -r . $PAK_DIR/
@@ -50,6 +70,25 @@ This lets the script run through the config import and settings logic without th
 
 ## Testing on Device (SD Card)
 
+### Build Requirements
+
+`make build` downloads `minui-list`, `minui-presenter`, and `jq` directly. It also builds `wg`
+statically from source inside an Alpine arm64 Docker container — this requires Docker with arm64
+QEMU binfmt support.
+
+One-time setup:
+```sh
+docker run --privileged --rm tonistiigi/binfmt --install arm64
+```
+
+`wireguard-go` is built by the release workflow only (it requires Go). For local testing you can
+build it manually:
+```sh
+git clone https://github.com/WireGuard/wireguard-go /tmp/wireguard-go
+cd /tmp/wireguard-go
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/arm64/wireguard-go .
+```
+
 ### Build and Install
 
 ```sh
@@ -74,6 +113,32 @@ rsync -av --exclude='.git' --exclude='dist' --exclude='*.md' \
 
 You can update scripts between tests without rebooting — just re-launch from the NextUI menu.
 
+### SSH Access to the Device
+
+The device runs dropbear SSH on port 22. Credentials: `root` / `tina`.
+
+The device's IP is DHCP-assigned on wlan0. To find it, either:
+- Check your router's DHCP leases, or
+- Look at the device display for an IP (if a pak shows it), or
+- Use the SSH Server pak which displays the IP on screen
+
+Once you have the IP:
+
+```sh
+ssh root@<device-ip>
+```
+
+This gives you an interactive shell for debugging without needing to remove the SD card.
+Useful commands once connected:
+
+```sh
+wg show wg0
+ip addr show wg0
+ping 10.8.0.1  # ping WireGuard server's VPN IP
+logread        # system log (if available)
+cat /mnt/SDCARD/.userdata/tg5040/logs/WireGuard.txt
+```
+
 ### Verifying on Device
 
 If you have shell access:
@@ -89,7 +154,7 @@ ping 10.8.0.1  # ping WireGuard server's VPN IP
 1. Enable "Start on boot" in the pak menu
 2. Verify the boot hook was written:
    ```sh
-   cat /mnt/sdcard/.userdata/tg5040/auto.sh
+   cat /mnt/SDCARD/.userdata/tg5040/auto.sh
    # Should contain: ...on-boot # WireGuard.pak-on-boot
    ```
 3. Reboot device
@@ -101,12 +166,16 @@ ping 10.8.0.1  # ping WireGuard server's VPN IP
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
 | Pak doesn't appear in Tools menu | Missing `.pak` extension on folder | Rename folder to `WireGuard.pak` |
-| Black screen on launch | `launch.sh` crash at startup | Check `WireGuard.txt` log |
-| "wg not found" | Binary not executable or wrong arch | `chmod +x bin/arm64/wg`, verify binary arch |
+| Black screen on launch | `launch.sh` crash at startup | Check `WireGuard.txt` log via SSH |
+| "wg not found" | Binary missing or not executable | Run `chmod +x bin/arm64/wg`; verify it was built with `LDFLAGS=-static` |
+| `wg` fails silently / "No such file or directory" | musl-linked binary on glibc device | Rebuild `wg` statically (see Build Requirements); confirm `/lib/ld-musl-aarch64.so.1` is absent |
+| "no WireGuard driver available" | Neither kernel module nor wireguard-go found | Confirm `wireguard-go` is in `bin/arm64/` and is executable |
+| wireguard-go exits immediately | `/dev/net/tun` missing or inaccessible | SSH in and run `ls -la /dev/net/tun`; confirmed present on TrimUI Brick |
+| WireGuard comes up but "wg set failed" | Corrupt wg0.conf or wrong key format | Check log; manually parse conf with awk |
 | Handshake never succeeds | Firewall / endpoint unreachable | Test endpoint from another WireGuard client |
-| Config not imported | wg0.conf not at SD root | Must be at `/mnt/sdcard/wg0.conf` exactly |
+| Config not imported | wg0.conf not at SD root | Must be at `/mnt/SDCARD/wg0.conf` exactly (uppercase SDCARD) |
 | wg0 comes up but no traffic | AllowedIPs too restrictive | Check AllowedIPs in wg0.conf |
-| wireguard-go fails to start | Missing TUN kernel support | Check `/dev/net/tun` exists on device |
+| "Enable" toggle reverts to off after relaunch | wireguard_up() failed silently | Check `WireGuard.txt` log for the error |
 
 ## Shell Compatibility Notes
 

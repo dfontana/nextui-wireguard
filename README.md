@@ -116,6 +116,20 @@ The pak uses:
 
 See [`docs/`](docs/) for detailed research notes on the implementation.
 
+## Limitations
+
+### Full-tunnel (route-all-traffic) mode is not supported
+
+`AllowedIPs = 0.0.0.0/0` will not work correctly. The pak adds a route via `wg0` for each AllowedIPs CIDR but does not replace the existing default route via `wlan0`. With two competing default routes, traffic will not reliably go through the VPN. Split-tunnel configurations (specific subnets in `AllowedIPs`) work correctly.
+
+### DNS is not configured
+
+The `DNS =` field in `[Interface]` is parsed from the config file but ignored. The device continues to use its DHCP-assigned nameserver. This matters if the VPN provides internal hostnames or uses split-horizon DNS.
+
+### Only one `[Peer]` block is supported
+
+If `wg0.conf` contains multiple `[Peer]` sections, only the first peer's `PublicKey`, `Endpoint`, `AllowedIPs`, and `PresharedKey` are used. All subsequent peers are silently ignored.
+
 ## License
 
 MIT — see [LICENSE](LICENSE)

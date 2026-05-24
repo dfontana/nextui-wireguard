@@ -24,19 +24,21 @@ wireguard_up() {
     conf="$USERDATA_PATH/$PAK_NAME/wg0.conf"
 
     # Parse [Interface] section
-    private_key=$(awk '/^\[Interface\]/{found=1} found && /^\[Peer\]/{found=0} found && /^PrivateKey/{print}' "$conf" \
+    private_key=$(awk '/^\[Interface\]/{f=1} f && /^\[Peer\]/{f=0} f && /^PrivateKey/{print}' "$conf" \
         | awk -F'=' '{print $2}' | tr -d ' \t')
-    address=$(awk '/^\[Interface\]/{found=1} found && /^\[Peer\]/{found=0} found && /^Address/{print}' "$conf" \
+    address=$(awk '/^\[Interface\]/{f=1} f && /^\[Peer\]/{f=0} f && /^Address/{print}' "$conf" \
         | awk -F'=' '{print $2}' | tr -d ' \t')
 
     # Parse [Peer] section
-    peer_pubkey=$(awk '/^\[Peer\]/{found=1} found && /^PublicKey/{print}' "$conf" \
+    peer_pubkey=$(awk '/^\[Peer\]/{f=1} f && /^PublicKey/{print}' "$conf" \
         | awk -F'=' '{print $2}' | tr -d ' \t')
-    endpoint=$(awk '/^\[Peer\]/{found=1} found && /^Endpoint/{print}' "$conf" \
+    endpoint=$(awk '/^\[Peer\]/{f=1} f && /^Endpoint/{print}' "$conf" \
         | awk -F'=' '{sub(/^[^=]+=/, ""); print}' | tr -d ' \t')
-    allowed_ips=$(awk '/^\[Peer\]/{found=1} found && /^AllowedIPs/{print}' "$conf" \
+    allowed_ips=$(awk '/^\[Peer\]/{f=1} f && /^AllowedIPs/{print}' "$conf" \
         | awk -F'=' '{print $2}' | tr -d ' \t')
-    keepalive=$(awk '/^\[Peer\]/{found=1} found && /^PersistentKeepalive/{print}' "$conf" \
+    keepalive=$(awk '/^\[Peer\]/{f=1} f && /^PersistentKeepalive/{print}' "$conf" \
+        | awk -F'=' '{print $2}' | tr -d ' \t')
+    psk=$(awk '/^\[Peer\]/{f=1} f && /^PresharedKey/{print}' "$conf" \
         | awk -F'=' '{print $2}' | tr -d ' \t')
 
     if [ -z "$private_key" ] || [ -z "$address" ] || [ -z "$peer_pubkey" ] || [ -z "$endpoint" ]; then
@@ -44,8 +46,11 @@ wireguard_up() {
         return 1
     fi
 
-    # Load kernel module or fall back to wireguard-go userspace driver
-    if modprobe wireguard 2>/dev/null || cat /proc/modules 2>/dev/null | grep -q '^wireguard '; then
+    # Load kernel module or fall back to wireguard-go userspace driver.
+    # modprobe may exit 0 even when the module doesn't exist (confirmed on
+    # TrimUI Brick / Tina Linux 4.9), so /proc/modules is the authoritative check.
+    modprobe wireguard 2>/dev/null
+    if grep -q '^wireguard ' /proc/modules 2>/dev/null; then
         echo "Using kernel WireGuard module"
         ip link add dev wg0 type wireguard 2>/dev/null || true
     elif command -v wireguard-go >/dev/null 2>&1; then
@@ -53,7 +58,7 @@ wireguard_up() {
         wireguard-go wg0 &
         # Wait for TUN device to appear (up to 5 seconds)
         i=0
-        while [ $i -lt 5 ] && ! ip link show wg0 >/dev/null 2>&1; do
+        while [ "$i" -lt 5 ] && ! ip link show wg0 >/dev/null 2>&1; do
             sleep 1
             i=$((i + 1))
         done
@@ -62,7 +67,7 @@ wireguard_up() {
             return 1
         fi
     else
-        echo "ERROR: no WireGuard driver available (no kernel module and no wireguard-go)"
+        echo "ERROR: no WireGuard driver available"
         return 1
     fi
 
@@ -70,25 +75,23 @@ wireguard_up() {
     tmpkey=$(mktemp)
     printf '%s\n' "$private_key" > "$tmpkey"
 
-    # Configure the WireGuard interface
-    if [ -n "$keepalive" ]; then
-        wg set wg0 \
-            private-key "$tmpkey" \
-            peer "$peer_pubkey" \
-            endpoint "$endpoint" \
-            allowed-ips "$allowed_ips" \
-            persistent-keepalive "$keepalive"
-    else
-        wg set wg0 \
-            private-key "$tmpkey" \
-            peer "$peer_pubkey" \
-            endpoint "$endpoint" \
-            allowed-ips "$allowed_ips"
+    # Write preshared key to temp file if present
+    tmpkey_psk=""
+    if [ -n "$psk" ]; then
+        tmpkey_psk=$(mktemp)
+        printf '%s\n' "$psk" >"$tmpkey_psk"
     fi
-    wg_exit=$?
-    rm -f "$tmpkey"
 
-    if [ $wg_exit -ne 0 ]; then
+    # Configure the WireGuard interface
+    set -- private-key "$tmpkey" peer "$peer_pubkey"
+    [ -n "$tmpkey_psk" ] && set -- "$@" preshared-key "$tmpkey_psk"
+    set -- "$@" endpoint "$endpoint" allowed-ips "$allowed_ips"
+    [ -n "$keepalive" ] && set -- "$@" persistent-keepalive "$keepalive"
+    wg set wg0 "$@"
+    wg_exit=$?
+    rm -f "$tmpkey" "$tmpkey_psk"
+
+    if [ "$wg_exit" -ne 0 ]; then
         echo "ERROR: wg set failed"
         ip link del wg0 2>/dev/null || true
         return 1

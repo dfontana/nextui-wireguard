@@ -46,22 +46,20 @@ show_message() {
 disable_start_on_boot() {
     sed -i "/${PAK_NAME}.pak-on-boot/d" "$SDCARD_PATH/.userdata/$PLATFORM/auto.sh"
     sync
-    return 0
 }
 
 enable_start_on_boot() {
     if [ ! -f "$SDCARD_PATH/.userdata/$PLATFORM/auto.sh" ]; then
-        printf '#!/bin/sh\n\n' >"$SDCARD_PATH/.userdata/$PLATFORM/auto.sh"
+        echo '#!/bin/sh' >"$SDCARD_PATH/.userdata/$PLATFORM/auto.sh"
+        echo '' >>"$SDCARD_PATH/.userdata/$PLATFORM/auto.sh"
     fi
-    echo "test -f \"$PAK_DIR/bin/on-boot\" && \"$PAK_DIR/bin/on-boot\" # ${PAK_NAME}.pak-on-boot" \
-        >>"$SDCARD_PATH/.userdata/$PLATFORM/auto.sh"
+    echo "test -f \"\$SDCARD_PATH/Tools/\$PLATFORM/$PAK_NAME.pak/bin/on-boot\" && \"\$SDCARD_PATH/Tools/\$PLATFORM/$PAK_NAME.pak/bin/on-boot\" # ${PAK_NAME}.pak-on-boot" >>"$SDCARD_PATH/.userdata/$PLATFORM/auto.sh"
     chmod +x "$SDCARD_PATH/.userdata/$PLATFORM/auto.sh"
     sync
-    return 0
 }
 
 will_start_on_boot() {
-    grep -q "${PAK_NAME}.pak-on-boot" "$SDCARD_PATH/.userdata/$PLATFORM/auto.sh" >/dev/null 2>&1
+    grep -q "${PAK_NAME}.pak-on-boot" "$SDCARD_PATH/.userdata/$PLATFORM/auto.sh"
 }
 
 # ---------------------------------------------------------------------------
@@ -75,11 +73,11 @@ is_wireguard_up() {
 }
 
 get_wireguard_ip() {
-    ip addr show wg0 2>/dev/null | awk '/inet /{print $2}' | head -1
+    ip addr show wg0 2>/dev/null | awk '/inet /{print $2; exit}'
 }
 
 get_last_handshake() {
-    ts=$(wg show wg0 latest-handshakes 2>/dev/null | awk '{print $2}' | head -1)
+    ts=$(wg show wg0 latest-handshakes 2>/dev/null | awk '{print $2; exit}')
     if [ -z "$ts" ] || [ "$ts" = "0" ]; then
         echo "None"
         return
@@ -113,14 +111,19 @@ wireguard_up() {
         | awk -F'=' '{print $2}' | tr -d ' \t')
     keepalive=$(awk '/^\[Peer\]/{f=1} f && /^PersistentKeepalive/{print}' "$conf" \
         | awk -F'=' '{print $2}' | tr -d ' \t')
+    psk=$(awk '/^\[Peer\]/{f=1} f && /^PresharedKey/{print}' "$conf" \
+        | awk -F'=' '{print $2}' | tr -d ' \t')
 
     if [ -z "$private_key" ] || [ -z "$address" ] || [ -z "$peer_pubkey" ] || [ -z "$endpoint" ]; then
         echo "ERROR: wg0.conf is missing required fields"
         return 1
     fi
 
-    # Load kernel module or fall back to wireguard-go
-    if modprobe wireguard 2>/dev/null || grep -q '^wireguard ' /proc/modules 2>/dev/null; then
+    # Load kernel module or fall back to wireguard-go.
+    # modprobe may exit 0 even when the module doesn't exist (confirmed on
+    # TrimUI Brick / Tina Linux 4.9), so /proc/modules is the authoritative check.
+    modprobe wireguard 2>/dev/null
+    if grep -q '^wireguard ' /proc/modules 2>/dev/null; then
         echo "Using kernel WireGuard module"
         ip link add dev wg0 type wireguard 2>/dev/null || true
     elif command -v wireguard-go >/dev/null 2>&1; then
@@ -144,23 +147,21 @@ wireguard_up() {
     tmpkey=$(mktemp)
     printf '%s\n' "$private_key" >"$tmpkey"
 
-    # Configure WireGuard interface
-    if [ -n "$keepalive" ]; then
-        wg set wg0 \
-            private-key "$tmpkey" \
-            peer "$peer_pubkey" \
-            endpoint "$endpoint" \
-            allowed-ips "$allowed_ips" \
-            persistent-keepalive "$keepalive"
-    else
-        wg set wg0 \
-            private-key "$tmpkey" \
-            peer "$peer_pubkey" \
-            endpoint "$endpoint" \
-            allowed-ips "$allowed_ips"
+    # Write preshared key to temp file if present
+    tmpkey_psk=""
+    if [ -n "$psk" ]; then
+        tmpkey_psk=$(mktemp)
+        printf '%s\n' "$psk" >"$tmpkey_psk"
     fi
+
+    # Configure WireGuard interface
+    set -- private-key "$tmpkey" peer "$peer_pubkey"
+    [ -n "$tmpkey_psk" ] && set -- "$@" preshared-key "$tmpkey_psk"
+    set -- "$@" endpoint "$endpoint" allowed-ips "$allowed_ips"
+    [ -n "$keepalive" ] && set -- "$@" persistent-keepalive "$keepalive"
+    wg set wg0 "$@"
     wg_exit=$?
-    rm -f "$tmpkey"
+    rm -f "$tmpkey" "$tmpkey_psk"
 
     if [ "$wg_exit" -ne 0 ]; then
         echo "ERROR: wg set failed"
@@ -209,31 +210,16 @@ import_config() {
 # ---------------------------------------------------------------------------
 
 current_settings() {
-    minui_list_file="/tmp/${PAK_NAME}-settings.json"
-    rm -f "$minui_list_file"
-
-    # Write to temp file rather than piping/heredoc — BusyBox ash has
-    # inconsistent heredoc behavior when piped to commands like jq.
-    jq -rM '{settings: .settings}' "$PAK_DIR/config.json" >"$minui_list_file"
-
-    if is_wireguard_up; then
-        jq '.settings[0].selected = 1' "$minui_list_file" >"$minui_list_file.tmp"
-        mv "$minui_list_file.tmp" "$minui_list_file"
-    fi
-
-    if will_start_on_boot; then
-        jq '.settings[1].selected = 1' "$minui_list_file" >"$minui_list_file.tmp"
-        mv "$minui_list_file.tmp" "$minui_list_file"
-    fi
-
-    cat "$minui_list_file"
+    is_wireguard_up && up=1 || up=0
+    will_start_on_boot && boot=1 || boot=0
+    jq -M --argjson up "$up" --argjson boot "$boot" \
+        '.settings[0].selected = $up | .settings[1].selected = $boot' \
+        "$PAK_DIR/config.json"
 }
 
 main_screen() {
     settings="$1"
     minui_list_file="/tmp/${PAK_NAME}-minui-list.json"
-    rm -f "$minui_list_file"
-
     echo "$settings" >"$minui_list_file"
 
     if is_wireguard_up; then
@@ -257,12 +243,8 @@ main_screen() {
 }
 
 cleanup() {
-    rm -f "/tmp/${PAK_NAME}-old-settings.json"
-    rm -f "/tmp/${PAK_NAME}-new-settings.json"
-    rm -f "/tmp/${PAK_NAME}-settings.json"
-    rm -f "/tmp/${PAK_NAME}-minui-list.json"
-    rm -f /tmp/stay_awake
-    killall minui-presenter >/dev/null 2>&1 || true
+    rm -f "/tmp/${PAK_NAME}-minui-list.json" /tmp/stay_awake
+    killall minui-presenter 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------
@@ -322,14 +304,10 @@ main() {
             break
         fi
 
-        echo "$settings" >"/tmp/${PAK_NAME}-old-settings.json"
-        echo "$new_settings" >"/tmp/${PAK_NAME}-new-settings.json"
-
-        old_enabled="$(jq -rM '.settings[0].selected' "/tmp/${PAK_NAME}-old-settings.json")"
-        enabled="$(jq -rM '.settings[0].selected' "/tmp/${PAK_NAME}-new-settings.json")"
-
-        old_start_on_boot="$(jq -rM '.settings[1].selected' "/tmp/${PAK_NAME}-old-settings.json")"
-        start_on_boot="$(jq -rM '.settings[1].selected' "/tmp/${PAK_NAME}-new-settings.json")"
+        old_enabled="$(echo "$settings" | jq -rM '.settings[0].selected')"
+        enabled="$(echo "$new_settings" | jq -rM '.settings[0].selected')"
+        old_start_on_boot="$(echo "$settings" | jq -rM '.settings[1].selected')"
+        start_on_boot="$(echo "$new_settings" | jq -rM '.settings[1].selected')"
 
         if [ "$old_enabled" != "$enabled" ]; then
             if [ "$enabled" = "1" ]; then

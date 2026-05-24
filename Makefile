@@ -7,11 +7,13 @@ MINUI_LIST_VERSION      := 0.11.3
 MINUI_PRESENTER_VERSION := 0.7.0
 JQ_VERSION              := 1.7.1
 
-# Alpine Linux stable version to pull wireguard-tools-wg from.
-# wireguard-tools-wg lives in the `main` repo (not community).
-# We query APKINDEX.tar.gz at build time to discover the exact version+revision
-# so the Makefile never needs updating when Alpine bumps the -rN suffix.
-# Check available versions at: https://pkgs.alpinelinux.org/package/edge/main/aarch64/wireguard-tools-wg
+# Alpine Linux version used as the arm64 build container for wg.
+# wg is compiled with LDFLAGS=-static inside an Alpine/musl container so the
+# resulting binary is fully self-contained and runs on any Linux ABI (glibc,
+# musl, uclibc). The TrimUI Brick uses glibc 2.33, which cannot run Alpine's
+# pre-built musl-dynamic wg binary.
+# Requires Docker with arm64 QEMU support; in CI that is set up by the release
+# workflow before calling `make build`.
 ALPINE_VERSION := 3.21
 
 # wireguard-go built from source by the release workflow (see .github/workflows/release.yaml)
@@ -23,11 +25,9 @@ ALPINE_VERSION := 3.21
 .PHONY: clean bump-version build release
 
 clean:
-	rm -f bin/*/minui-list bin/*/minui-presenter || true
-	rm -f bin/arm64/jq || true
-	rm -f bin/arm64/wg || true
-	rm -f bin/arm64/wireguard-go || true
-	rm -f bin/*/*.LICENSE || true
+	rm -f bin/*/minui-list bin/*/minui-presenter
+	rm -f bin/arm64/jq bin/arm64/wg bin/arm64/wireguard-go
+	rm -f bin/*/*.LICENSE
 
 bump-version:
 	jq '.version = "$(RELEASE_VERSION)"' pak.json > pak.json.tmp
@@ -57,24 +57,19 @@ bin/arm64/jq:
 	curl -sSL -o bin/arm64/jq.LICENSE \
 		"https://github.com/jqlang/jq/raw/refs/heads/master/COPYING"
 
-# Extract wg from Alpine Linux wireguard-tools-wg package.
-# APK files are gzipped tarballs; wg lives at usr/bin/wg inside.
-# We look up the exact filename (including -rN revision) from APKINDEX.tar.gz
-# so the Makefile doesn't need updating when Alpine bumps the revision suffix.
+# Build wg statically inside an Alpine arm64 Docker container so the binary
+# runs on any Linux ABI. Requires Docker with arm64 QEMU binfmt support.
+# In CI the release workflow enables QEMU before calling `make build`.
+# Locally: docker run --privileged --rm tonistiigi/binfmt --install arm64
 bin/arm64/wg:
-	mkdir -p bin/arm64 /tmp/wg-arm64-extract
-	wg_ver=$$(curl -sSL \
-		"https://dl-cdn.alpinelinux.org/alpine/v$(ALPINE_VERSION)/main/aarch64/APKINDEX.tar.gz" | \
-		tar -xzO APKINDEX 2>/dev/null | \
-		grep -A 10 "^P:wireguard-tools-wg$$" | grep "^V:" | head -1 | cut -c3-) && \
-	[ -n "$$wg_ver" ] || { echo "ERROR: wireguard-tools-wg not found in APKINDEX"; exit 1; } && \
-	echo "Downloading wireguard-tools-wg $$wg_ver (aarch64)..." && \
-	curl -f -sSL -o /tmp/wg-arm64.apk \
-		"https://dl-cdn.alpinelinux.org/alpine/v$(ALPINE_VERSION)/main/aarch64/wireguard-tools-wg-$${wg_ver}.apk" && \
-	tar -xzf /tmp/wg-arm64.apk -C /tmp/wg-arm64-extract
-	find /tmp/wg-arm64-extract -name 'wg' -type f -exec cp {} bin/arm64/wg \;
-	chmod +x bin/arm64/wg
-	rm -rf /tmp/wg-arm64.apk /tmp/wg-arm64-extract
+	mkdir -p bin/arm64
+	docker run --rm --platform linux/arm64 \
+		-v "$(CURDIR)/bin/arm64:/output" \
+		alpine:$(ALPINE_VERSION) sh -c \
+		'apk add --no-cache gcc make libmnl-dev libmnl-static git && \
+		 git clone --depth=1 https://git.zx2c4.com/wireguard-tools /tmp/wt && \
+		 LDFLAGS="-static" make -C /tmp/wt/src wg && \
+		 cp /tmp/wt/src/wg /output/wg && chmod +x /output/wg'
 	curl -sSL -o bin/arm64/wg.LICENSE \
 		"https://git.zx2c4.com/wireguard-tools/plain/COPYING"
 
