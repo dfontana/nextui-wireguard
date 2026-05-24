@@ -13,6 +13,9 @@ disable_start_on_boot() {
 }
 
 enable_start_on_boot() {
+    # Idempotent — if the marker is already in auto.sh, do nothing. Otherwise a
+    # second toggle (or any external state drift) would append duplicate hook lines.
+    will_start_on_boot && return 0
     if [ ! -f "$SDCARD_PATH/.userdata/$PLATFORM/auto.sh" ]; then
         echo '#!/bin/sh' >"$SDCARD_PATH/.userdata/$PLATFORM/auto.sh"
         echo '' >>"$SDCARD_PATH/.userdata/$PLATFORM/auto.sh"
@@ -23,5 +26,5 @@ enable_start_on_boot() {
 }
 
 will_start_on_boot() {
-    grep -q "${PAK_NAME}.pak-on-boot" "$SDCARD_PATH/.userdata/$PLATFORM/auto.sh"
+    grep -q "${PAK_NAME}.pak-on-boot" "$SDCARD_PATH/.userdata/$PLATFORM/auto.sh" 2>/dev/null
 }

@@ -148,6 +148,44 @@ logread        # system log (if available)
 cat /mnt/SDCARD/.userdata/tg5040/logs/WireGuard.txt
 ```
 
+#### Scripted SSH (non-interactive, no key install)
+
+Dropbear accepts only password auth out of the box. macOS doesn't ship `sshpass` and adding
+a pubkey to `/root/.ssh/authorized_keys` would persist beyond the dev session. The portable
+workaround is `expect` (preinstalled at `/usr/bin/expect` on macOS):
+
+```sh
+cat >/tmp/dev-ssh.exp <<'EOF'
+#!/usr/bin/expect -f
+set timeout 30
+log_user 0
+set host [lindex $argv 0]
+set cmd  [lindex $argv 1]
+spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $host $cmd
+expect "assword:"
+send "tina\r"
+log_user 1
+expect eof
+EOF
+chmod +x /tmp/dev-ssh.exp
+
+# Run any command on the device:
+/tmp/dev-ssh.exp root@192.168.50.57 'wg show wg0'
+
+# Transfer a small file via base64 (one-shot):
+B64=$(base64 -i some_file | tr -d '\n')
+/tmp/dev-ssh.exp root@192.168.50.57 "echo $B64 | base64 -d > /tmp/some_file"
+```
+
+The host arg is `root@<device-ip>`; the second arg is the remote shell command. `log_user 0`
+hides the password exchange noise; flipping back to `1` after `send` lets the remote
+command's stdout/stderr stream back normally.
+
+**Payload size limit:** dropbear closes the connection if the single command-argument string
+exceeds roughly 6 KB (observed empirically). For larger files, base64-encode and send in
+chunks of ~2000 chars with `>>` append on the remote side, then `base64 -d < /tmp/payload.b64`
+into the target file.
+
 ### Verifying on Device
 
 If you have shell access:
@@ -198,6 +236,16 @@ The device runs BusyBox ash (POSIX sh). Key constraints:
 - **Sourcing works**: `. /absolute/path/to/lib.sh` loads a file and makes its functions
   available in the calling shell. Verified on this device. The libraries under `bin/lib/`
   rely on this — see Code Structure below.
+- **`exec >>"$file"` silently no-ops on missing parent dir**: if `$LOGS_PATH` (or any other
+  parent) doesn't exist, the redirect fails quietly and every subsequent stdout/stderr write
+  is lost. Always `mkdir -p` the directory before the redirect. `init_logging` in
+  `bin/lib/common.sh` does this — copy that pattern for any other log/output redirect.
+- **`grep PATTERN "$file"` prints to stderr when `$file` is missing** (BusyBox grep, not just
+  the GNU one). With `set -x` or normal output capture, the `grep: $file: No such file or
+  directory` line ends up in the log. If the missing-file case is a normal "no" answer
+  (e.g. `will_start_on_boot` checking `auto.sh`), pipe stderr to `/dev/null`.
+- **`killall NAME` is BusyBox v1.27.2** and matches the exact process `comm` (basename of
+  `/proc/PID/exe`), not the full command line. Safe to call with `2>/dev/null || true`.
 - **Test locally with `dash`** for closer POSIX behavior than `bash`. Both `sh -n` and `dash -n`
   catch most ash-incompatible syntax before deploying.
 

@@ -233,6 +233,25 @@ ssh root@<device-ip>
 
 This is the fastest way to get an interactive shell for debugging without removing the SD card.
 
+For scripted (non-interactive) access — used during dev for piping commands or transferring
+files — see "Scripted SSH" in `development-guide.md`. The short version: drive `ssh` with
+`expect` since dropbear is password-only and adding a pubkey would persist beyond the
+session.
+
+### Dropbear command-line length limit
+
+The device's dropbear closes the connection when the single remote-command argument exceeds
+roughly **6 KB** (observed empirically while pushing a base64-encoded shell file in one
+shot — `Connection closed by remote host` with no other diagnostic). Smaller commands
+transfer cleanly. For larger payloads, chunk the base64 in pieces of ~2000 chars and append
+on the remote side, then `base64 -d` into the target file.
+
+### BusyBox utility versions
+
+BusyBox `v1.27.2` (released 2017) — older than most current Linux distros. Verified by
+running `busybox` or `killall --help`. Relevant for picking up newer flags that don't exist:
+e.g., `find -printf` and `grep -P` are absent. Stick to POSIX-defined flags.
+
 ### Useful on-device commands
 
 ```sh

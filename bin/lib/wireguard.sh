@@ -15,6 +15,10 @@ get_wireguard_ip() {
     ip addr show wg0 2>/dev/null | awk '/inet /{print $2; exit}'
 }
 
+get_endpoint() {
+    wg show wg0 endpoints 2>/dev/null | awk '{print $2; exit}'
+}
+
 get_last_handshake() {
     ts=$(wg show wg0 latest-handshakes 2>/dev/null | awk '{print $2; exit}')
     if [ -z "$ts" ] || [ "$ts" = "0" ]; then
@@ -38,27 +42,38 @@ wireguard_up() {
 
     # Parse [Interface] section
     private_key=$(awk '/^\[Interface\]/{f=1} f && /^\[Peer\]/{f=0} f && /^PrivateKey/{print}' "$conf" \
-        | awk -F'=' '{print $2}' | tr -d ' \t')
+        | awk '{sub(/^[^=]+=[ \t]*/, ""); print}' | tr -d ' \t\r')
     address=$(awk '/^\[Interface\]/{f=1} f && /^\[Peer\]/{f=0} f && /^Address/{print}' "$conf" \
-        | awk -F'=' '{print $2}' | tr -d ' \t')
+        | awk -F'=' '{print $2}' | tr -d ' \t\r')
     dns=$(awk '/^\[Interface\]/{f=1} f && /^\[Peer\]/{f=0} f && /^DNS/{print}' "$conf" \
-        | awk -F'=' '{print $2}' | tr -d ' \t')
+        | awk -F'=' '{print $2}' | tr -d ' \t\r')
 
     # Parse [Peer] section
     peer_pubkey=$(awk '/^\[Peer\]/{f=1} f && /^PublicKey/{print}' "$conf" \
-        | awk -F'=' '{print $2}' | tr -d ' \t')
+        | awk '{sub(/^[^=]+=[ \t]*/, ""); print}' | tr -d ' \t\r')
     endpoint=$(awk '/^\[Peer\]/{f=1} f && /^Endpoint/{print}' "$conf" \
-        | awk -F'[=]' '{sub(/^[^=]+=/, ""); print}' | tr -d ' \t')
+        | awk -F'[=]' '{sub(/^[^=]+=/, ""); print}' | tr -d ' \t\r')
     allowed_ips=$(awk '/^\[Peer\]/{f=1} f && /^AllowedIPs/{print}' "$conf" \
-        | awk -F'=' '{print $2}' | tr -d ' \t')
+        | awk -F'=' '{print $2}' | tr -d ' \t\r')
     keepalive=$(awk '/^\[Peer\]/{f=1} f && /^PersistentKeepalive/{print}' "$conf" \
-        | awk -F'=' '{print $2}' | tr -d ' \t')
+        | awk -F'=' '{print $2}' | tr -d ' \t\r')
     psk=$(awk '/^\[Peer\]/{f=1} f && /^PresharedKey/{print}' "$conf" \
-        | awk -F'=' '{print $2}' | tr -d ' \t')
+        | awk '{sub(/^[^=]+=[ \t]*/, ""); print}' | tr -d ' \t\r')
 
     if [ -z "$private_key" ] || [ -z "$address" ] || [ -z "$peer_pubkey" ] || [ -z "$endpoint" ]; then
         echo "ERROR: wg0.conf is missing required fields"
         return 1
+    fi
+
+    # WiFi pre-flight: detect NO-CARRIER (wlan0 admin-up but no link-layer
+    # association). Seen on the iOS personal hotspot path: NextUI reports
+    # "connected" but the radio is actually disassociated and stale routes from
+    # the previous network remain installed — nothing leaves the device. The
+    # only known fix is toggling WiFi off/on from NextUI's WiFi panel, so we
+    # bail with a distinct exit code (2) and let the launcher show that hint.
+    if ip link show wlan0 2>/dev/null | grep -q 'NO-CARRIER'; then
+        echo "ERROR: wlan0 has no carrier — WiFi link is down despite admin up"
+        return 2
     fi
 
     # Detect full-tunnel mode (AllowedIPs = 0.0.0.0/0)
@@ -115,6 +130,7 @@ wireguard_up() {
         done
         if ! ip link show wg0 >/dev/null 2>&1; then
             echo "ERROR: wireguard-go failed to create wg0 interface"
+            killall wireguard-go 2>/dev/null || true
             [ -n "$endpoint_ip" ] && ip route del "$endpoint_ip/32" 2>/dev/null || true
             return 1
         fi
@@ -147,6 +163,7 @@ wireguard_up() {
     if [ "$wg_exit" -ne 0 ]; then
         echo "ERROR: wg set failed"
         ip link del wg0 2>/dev/null || true
+        killall wireguard-go 2>/dev/null || true
         [ -n "$endpoint_ip" ] && ip route del "$endpoint_ip/32" 2>/dev/null || true
         return 1
     fi
@@ -160,23 +177,28 @@ wireguard_up() {
         # so they win longest-prefix-match without displacing it.
         ip route add 0.0.0.0/1 dev wg0 2>/dev/null || true
         ip route add 128.0.0.0/1 dev wg0 2>/dev/null || true
-        printf 'endpoint_ip=%s\ngw=%s\ngw_dev=%s\n' \
-            "$endpoint_ip" "$gw" "$gw_dev" >/tmp/wg0-state
+        # Save endpoint/gateway only on first apply; a re-entry must not overwrite
+        # the original gateway with a possibly-stale current one.
+        if [ ! -f /tmp/wg0-state ]; then
+            printf 'endpoint_ip=%s\ngw=%s\ngw_dev=%s\n' \
+                "$endpoint_ip" "$gw" "$gw_dev" >/tmp/wg0-state
+        fi
     else
         echo "$allowed_ips" | tr ',' '\n' | while read -r cidr; do
-            cidr=$(echo "$cidr" | tr -d ' \t')
+            cidr=$(echo "$cidr" | tr -d ' \t\r')
             [ -n "$cidr" ] && ip route add "$cidr" dev wg0 2>/dev/null || true
         done
     fi
 
-    # Apply VPN DNS — only if backup of current resolv.conf succeeds, so we can
-    # always restore the original on wireguard_down even if something goes wrong.
+    # Apply VPN DNS — only if we have (or can make) a backup of the original
+    # resolv.conf. A re-entry must NOT overwrite an existing backup, since after
+    # the first apply the file contents are already the VPN DNS.
     if [ -n "$dns" ]; then
         resolv_target=$(readlink -f /etc/resolv.conf 2>/dev/null || echo /etc/resolv.conf)
-        if cp "$resolv_target" /tmp/wg0-dns.bak 2>/dev/null; then
+        if [ -f /tmp/wg0-dns.bak ] || cp "$resolv_target" /tmp/wg0-dns.bak 2>/dev/null; then
             {
                 echo "$dns" | tr ',' '\n' | while read -r server; do
-                    server=$(echo "$server" | tr -d ' \t')
+                    server=$(echo "$server" | tr -d ' \t\r')
                     [ -n "$server" ] && printf 'nameserver %s\n' "$server"
                 done
             } >"$resolv_target" || rm -f /tmp/wg0-dns.bak

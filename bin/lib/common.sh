@@ -8,7 +8,10 @@
 
 init_logging() {
     log_name="$1"
-    rm -f "$LOGS_PATH/$log_name"
+    # mkdir before redirect — if $LOGS_PATH doesn't exist, `exec >>` silently
+    # fails on BusyBox ash and all subsequent output is lost.
+    mkdir -p "$LOGS_PATH"
+    mv -f "$LOGS_PATH/$log_name" "$LOGS_PATH/$log_name.prev" 2>/dev/null || true
     exec >>"$LOGS_PATH/$log_name"
     exec 2>&1
 }

@@ -64,6 +64,14 @@ main_screen() {
             mv "$minui_list_file.tmp" "$minui_list_file"
         fi
 
+        endpoint="$(get_endpoint)"
+        if [ -n "$endpoint" ]; then
+            jq --arg ep "$endpoint" \
+                '.settings[.settings | length] |= . + {"name": "Endpoint", "options": [$ep], "selected": 0, "features": {"unselectable": true}}' \
+                "$minui_list_file" >"$minui_list_file.tmp"
+            mv "$minui_list_file.tmp" "$minui_list_file"
+        fi
+
         handshake="$(get_last_handshake)"
         jq --arg hs "$handshake" \
             '.settings[.settings | length] |= . + {"name": "Handshake", "options": [$hs], "selected": 0, "features": {"unselectable": true}}' \
@@ -146,8 +154,14 @@ Drop wg0.conf at SD card root and relaunch." 5
         if [ "$old_enabled" != "$enabled" ]; then
             if [ "$enabled" = "1" ]; then
                 show_message "Starting $HUMAN_READABLE_NAME..." forever
-                if wireguard_up "$WG_CONF_STORED"; then
+                wireguard_up "$WG_CONF_STORED"
+                rc=$?
+                if [ "$rc" = 0 ]; then
                     killall minui-presenter >/dev/null 2>&1 || true
+                elif [ "$rc" = 2 ]; then
+                    # Exit code 2 from wireguard_up = WiFi NO-CARRIER. Toggling
+                    # WiFi off and on from NextUI's WiFi panel is the known fix.
+                    show_message "WiFi link down. Toggle WiFi off and back on, then try again." 5
                 else
                     show_message "Failed to start $HUMAN_READABLE_NAME." 3
                 fi
