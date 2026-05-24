@@ -73,13 +73,13 @@ This lets the script run through the config import and settings logic without th
 ### Build Requirements
 
 `make build` downloads `minui-list`, `minui-presenter`, and `jq` directly. It also builds `wg`
-statically from source inside an Alpine arm64 Docker container — this requires Docker with arm64
-QEMU binfmt support.
+statically from source inside an Alpine arm64 Docker container.
 
-One-time setup:
-```sh
-docker run --privileged --rm tonistiigi/binfmt --install arm64
-```
+- **Apple Silicon Mac**: arm64 Docker containers run natively — no QEMU setup needed.
+- **x86_64 Linux / CI**: requires QEMU binfmt. One-time setup:
+  ```sh
+  docker run --privileged --rm tonistiigi/binfmt --install arm64
+  ```
 
 `wireguard-go` is built by the release workflow only (it requires Go). For local testing you can
 build it manually:
@@ -104,14 +104,23 @@ unzip -o dist/WireGuard.pak.zip -d /Volumes/SDCARD/Tools/tg5040/WireGuard.pak/
 cp ~/wg0.conf /Volumes/SDCARD/wg0.conf
 ```
 
-### Fast Iteration (Skip Zip)
+### Fast Iteration (Deploy over SSH)
+
+The device does not have `rsync`, and Dropbear's SSH server does not ship `sftp-server` so
+`scp` does not work. Use the deploy script, which pipes a tar archive over SSH:
 
 ```sh
-rsync -av --exclude='.git' --exclude='dist' --exclude='*.md' \
-  . /Volumes/SDCARD/Tools/tg5040/WireGuard.pak/
+make release && make deploy          # build + deploy in one step
+make deploy DEVICE=root@<other-ip>   # override IP
 ```
 
-You can update scripts between tests without rebooting — just re-launch from the NextUI menu.
+`deploy.sh` unzips `dist/WireGuard.pak.zip` to a temp dir and transfers it via
+`tar -cf - . | ssh <device> "tar -xf - -C <pak-dir>"`.
+
+Scripts can be updated between tests without rebooting — just re-launch from the NextUI menu.
+
+**Note:** macOS tar includes `._*` AppleDouble resource-fork files in archives. These land in
+the pak directory on the device but are harmless — BusyBox ignores them.
 
 ### SSH Access to the Device
 
@@ -176,6 +185,7 @@ ping 10.8.0.1  # ping WireGuard server's VPN IP
 | Config not imported | wg0.conf not at SD root | Must be at `/mnt/SDCARD/wg0.conf` exactly (uppercase SDCARD) |
 | wg0 comes up but no traffic | AllowedIPs too restrictive | Check AllowedIPs in wg0.conf |
 | "Enable" toggle reverts to off after relaunch | wireguard_up() failed silently | Check `WireGuard.txt` log for the error |
+| `\n` appears literally in a message | `minui-presenter` does not interpret `\n` escape sequences | Use a real newline in the shell string literal |
 
 ## Shell Compatibility Notes
 

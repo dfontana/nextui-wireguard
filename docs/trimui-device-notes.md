@@ -52,9 +52,10 @@ BusyBox provides most standard POSIX utilities. Notable tools relevant to WireGu
 
 | Tool        | Available?       | Path (confirmed)       | Notes                                             |
 |-------------|------------------|------------------------|---------------------------------------------------|
-| `ip`        | Yes (confirmed)  | `/sbin/ip`             | Supports `addr`, `link`, `route`                  |
+| `ip`        | Yes (confirmed)  | `/sbin/ip`             | Supports `addr`, `link`, `route`, `rule`          |
 | `modprobe`  | Yes (confirmed)  | `/usr/sbin/modprobe`   | Exit code unreliable — see WireGuard section above |
 | `mktemp`    | Yes (confirmed)  | `/bin/mktemp`          | Used for private-key temp file                    |
+| `nslookup`  | Yes (confirmed)  | `/usr/bin/nslookup`    | Used to resolve endpoint hostnames                |
 | `awk`       | Yes (confirmed)  | `/usr/bin/awk`         |                                                   |
 | `sed`       | Yes (confirmed)  | `/bin/sed`             | BusyBox sed, supports `-i`                        |
 | `tr`        | Yes (confirmed)  | `/usr/bin/tr`          |                                                   |
@@ -64,7 +65,8 @@ BusyBox provides most standard POSIX utilities. Notable tools relevant to WireGu
 | `killall`   | Yes              | —                      | Signal processes by name                          |
 | `wget`      | Yes              | —                      | HTTP client (BusyBox wget)                        |
 | `curl`      | Not confirmed    | —                      | May not be present                                |
-| `resolvconf`| Not present      | —                      | Not needed — we skip DNS management               |
+| `rsync`     | Not present      | —                      | Not in BusyBox; use `tar \| ssh` to transfer files |
+| `resolvconf`| Not present      | —                      | DNS managed by direct resolv.conf write; see DNS section below |
 | `wg`        | No               | —                      | Must be bundled; see Binary Compatibility below   |
 | `wireguard-go` | No            | —                      | Must be bundled; see Binary Compatibility below   |
 
@@ -180,13 +182,36 @@ is dynamically linked against musl libc. It cannot exec on this glibc device. Th
 compiles `wg` from source inside an Alpine arm64 Docker container with `LDFLAGS="-static"`,
 producing a fully static binary with no runtime libc dependency.
 
-Building `wg` requires Docker with arm64 QEMU binfmt support. The CI release workflow sets this
-up automatically via `docker/setup-qemu-action`. For local builds:
+Building `wg` requires Docker with arm64 support. On Apple Silicon Macs, arm64 containers run
+natively — no QEMU needed. On x86_64 Linux (including CI), QEMU binfmt must be installed first;
+the CI workflow does this automatically via `docker/setup-qemu-action`. For manual x86_64 setup:
 
 ```sh
 docker run --privileged --rm tonistiigi/binfmt --install arm64
 make bin/arm64/wg
 ```
+
+The Alpine Docker container must install `build-base` (not just `gcc`) to get `musl-dev` and
+the C standard library headers — without it the `wg` compilation fails with `stdio.h: No such
+file or directory`.
+
+## DNS Architecture
+
+Confirmed via live inspection:
+
+- `/etc/resolv.conf` → symlink → `/tmp/resolv.conf` → symlink → `/tmp/resolv.conf.auto`
+- `/tmp/resolv.conf.auto` is the real file. `readlink -f /etc/resolv.conf` resolves to it.
+- **No `dnsmasq`** on this device. DNS is managed directly by `udhcpc` (`udhcpc -i wlan0 -b`),
+  which writes the DHCP-assigned nameserver straight to `/tmp/resolv.conf.auto`.
+- **No `resolvconf`** utility.
+
+To override DNS while the VPN is up: back up `/tmp/resolv.conf.auto`, write new `nameserver`
+lines to it, restore on VPN teardown. A DHCP renewal mid-session will overwrite the file —
+acceptable on a stable home Wi-Fi connection where renewals are infrequent. On reboot, `/tmp/`
+is wiped and `udhcpc` resets DNS from DHCP automatically.
+
+`ip rule show` confirms policy routing rules are present and the BusyBox `ip rule` command
+works, but it is not used by this pak (the two-route trick avoids needing it).
 
 ## SSH Access
 
