@@ -291,7 +291,8 @@ main() {
 
     # Require a config file before showing the menu
     if ! has_config; then
-        show_message "No WireGuard config found.\nDrop wg0.conf at SD card root and relaunch." 5
+        show_message "No WireGuard config found.
+Drop wg0.conf at SD card root and relaunch." 5
         return 0
     fi
 

@@ -22,7 +22,9 @@ ALPINE_VERSION := 3.21
 #   cd /tmp/wireguard-go
 #   GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o bin/arm64/wireguard-go .
 
-.PHONY: clean bump-version build release
+DEVICE ?= root@192.168.50.57
+
+.PHONY: clean bump-version build release deploy
 
 clean:
 	rm -f bin/*/minui-list bin/*/minui-presenter
@@ -93,3 +95,6 @@ release: build
 	mkdir -p dist
 	zip "dist/$(PAK_NAME).pak.zip" $(PAK_FILES)
 	ls -lah dist
+
+deploy: release
+	./deploy.sh

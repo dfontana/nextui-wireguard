@@ -111,7 +111,8 @@ built separately — see [`docs/development-guide.md`](docs/development-guide.md
 zip structure. No artifact is published.
 
 **Push a `v*.*.*` tag** — the release workflow does the same build, then creates a GitHub
-Release with `WireGuard.pak.zip` attached.
+Release with `WireGuard.pak.zip` attached. The version in `pak.json` is updated automatically
+from the tag; no manual edit needed.
 
 ## How It Works
 
